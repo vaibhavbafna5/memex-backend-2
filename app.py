@@ -32,6 +32,31 @@ def form_or_json():
     data = request.get_json(silent=True)
     return data if data is not None else request.form
 
+def flatten_data(entry):
+    data = ''
+    if entry['tags'] != None:
+        for tag in entry['tags']:
+            data += tag.lower()
+            data += " "
+            
+    if entry['notes'] != None:
+        data += entry['notes'].lower()
+        data += " "
+    
+    if entry['title'] != None:
+        data += entry['title'].lower()
+        data += " "
+        
+    if entry['keywords'] != None:
+        data += entry['keywords'].lower()
+        data += " "
+        
+    if entry['snippet'] != None:
+        data += entry['snippet'].lower()
+        data += " "
+    
+    return data
+
 @app.route("/")
 def index():
     return "merp merp 2020"
@@ -252,6 +277,30 @@ def delete_entry():
     else:
         abort(400, 'Error deleting entry - id invalid')
         return
+
+@app.route("/search", methods=['GET'])
+def search_entries():
+    email = request.args.get('email')
+    query = request.args.get('query')
+
+    queries = query.split(" ")
+    user_entries = entries_collection.find({'email': email})
+    
+    results = {}
+    
+    for term in queries:
+        
+        term = term.lower()
+        
+        for user_entry in user_entries:
+            data = flatten_data(user_entry)
+            
+            if term in data:
+                entry = user_entry
+                entry['_id'] = str(entry['_id'])
+                results[entry['_id']] = entry
+                
+    return results
 
 
 @app.route("/nuke-db", methods=['POST', 'GET'])
