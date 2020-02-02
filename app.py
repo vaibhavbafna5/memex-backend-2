@@ -1,4 +1,4 @@
-from flask import Flask, abort, request
+from flask import Flask, abort, request, jsonify
 from pymongo import MongoClient
 from bs4 import BeautifulSoup
 from flask_cors import CORS
@@ -80,18 +80,15 @@ def register_user():
         error = 'Email is required.'
 
     if error != None:
-        abort(400, error)
-        return
+        return {'error': error}, 400
 
     if users_collection.find_one({'email': email}) != None:
         error = 'Email with this account already exists.'
-        abort(400, error)
-        return
+        return {'error': error}, 400
 
     if users_collection.find_one({'username': username}) != None:
         error = 'Username with this account already exists.'
-        abort(400, error)
-        return
+        return {'error': error}, 400
 
     user_dict = {
         'username': username,
@@ -114,13 +111,13 @@ def register_user():
 def login_user():
     data = form_or_json()
 
-    username = data['username']
+    username = data['username'] or data['email']
     password = data['password']
 
     error = None
 
     # make sure parameters are present
-    if not username and not email:
+    if not username:
         error = 'Username or email is required.'
     elif not password:
         error = 'Password is required.'
@@ -130,6 +127,7 @@ def login_user():
         return
 
     resp = None
+    
     resp = users_collection.find_one({'email': username})
     if resp == None:
         resp = users_collection.find_one({'username': username})
@@ -142,9 +140,8 @@ def login_user():
             'username': resp['username'],
             'email': resp['email']
         }
-    
-    abort(400, 'Incorrect password.')
-    return
+
+    return {"error": "Invalid password"}, 400
 
 @app.route('/content', methods=['GET'])
 def get_user_content():
@@ -207,12 +204,29 @@ def create_user_entry():
             if meta.attrs['name'] == 'description':
                 entry_dict['snippet'] = meta.attrs['content']
 
+    # add to entries collection
     entries_collection.insert_one(entry_dict)
 
     response = entry_dict
     response['_id'] = str(response['_id'])
 
-    
+    # add to tags collection
+    if tags:
+        entry_id = ObjectId(response['_id'])
+        for tag in tags:
+            res = tags_collection.find_one({'tag': tag, 'email': email})
+            if res:
+                tags_query = {'tag': tag, 'email': email}
+                entries = res['entries']
+                entries.append(entry_id)
+                tags_collection.update_one(tags_query, {'$set': {'entries': entries}})
+            else:
+                tags_dict = {
+                    'tag': tag,
+                    'email': email,
+                    'entries': [entry_id]
+                }
+                tags_collection.insert_one(tags_dict)
 
     return response
 
@@ -225,12 +239,10 @@ def edit_entry():
     entry_id = ObjectId(entry_id)
 
     if email == None:
-        abort(400, 'Email not provided')
-        return
+        return {'error': 'Email not provided'}, 400
 
     if entry_id == None:
-        abort(400, 'Entry ID not provided')
-        return
+        return {'error': 'Entry ID not provided'}, 400
 
     notes = data['notes']
     snippet = data['snippet']
@@ -251,9 +263,52 @@ def edit_entry():
         'title': title,
     }
 
+    # get old entry & list of tags to be removed
+    old_entry = entries_collection.find_one({'_id': entry_id})
+    old_tags = old_entry['tags']
 
+    # update entries collection
     entries_collection.update_one(query, {'$set': new_values})
+
+    # remove tags that are no longer present
+    new_tags = tags
+    tags_to_remove = []
     
+    if old_tags:
+        for old_tag in old_tags:
+                if old_tag not in new_tags:
+                    tags_to_remove.append(old_tag)
+                    old_tag_res = tags_collection.find_one({'tag': old_tag, 'email': email})
+                    
+                    if len(old_tag_res['entries']) == 1:
+                        tags_collection.delete_one({'tag': old_tag, 'email': email})
+                    else:
+                        new_entries = old_tag_res['entries']
+                        new_entries.remove(entry_id)
+                        tags_query = {'tag': old_tag, 'email': email}
+                        tags_collection.update_one(tags_query, {'$set': {'entries': new_entries}})
+
+
+    # create new tags in tags collection
+    for tag in tags:
+        res = tags_collection.find_one({'tag': tag, 'email': email})
+       
+        if res:
+            tags_query = {'tag': tag, 'email': email}
+            entries = res['entries']
+            
+            if entry_id not in entries:
+                entries.append(entry_id)
+                tags_collection.update_one(tags_query, {'$set': {'entries': entries}})
+        else:
+            tags_dict = {
+                'tag': tag,
+                'email': email,
+                'entries': [entry_id]
+            }
+            tags_collection.insert_one(tags_dict)
+    
+    # response dictionary
     resp_dict = new_values
     resp_dict['_id'] = str(entry_id)
     resp_dict['email'] = email
@@ -265,8 +320,27 @@ def delete_entry():
     data = form_or_json()
 
     entry_id = data['entry_id']
+    email = data['email']
+
     entry_id = ObjectId(entry_id)
 
+    # delete entries in tag
+    entry_to_delete = entries_collection.find_one({'_id': entry_id})
+    tags_to_delete = entry_to_delete['tags']
+
+    if tags_to_delete:
+        for tag_to_delete in tags_to_delete:
+            resp = tags_collection.find_one({'tag': tag_to_delete, 'email': email})
+
+            if len(resp['entries']) == 1:
+                tags_collection.delete_one({'tag': tag_to_delete, 'email': email})
+            else:
+                new_entries = resp['entries']
+                new_entries.remove(entry_id)
+                tags_query = {'tag': tag_to_delete, 'email': email}
+                tags_collection.update_one(tags_query, {'$set': {'entries': new_entries}})
+
+    # delete actual entry from entries collection
     delete_query = {
         '_id': entry_id,
     }
@@ -283,30 +357,69 @@ def search_entries():
     email = request.args.get('email')
     query = request.args.get('query')
 
+    query = query.rstrip(" ")
+
     queries = query.split(" ")
     user_entries = entries_collection.find({'email': email})
+    user_entries = list(user_entries)
     
     results = {}
     
     for term in queries:
         
         term = term.lower()
-        
+        hits = 0
+
         for user_entry in user_entries:
             data = flatten_data(user_entry)
+            entry = user_entry
+            entry['_id'] = str(entry['_id'])
             
             if term in data:
-                entry = user_entry
-                entry['_id'] = str(entry['_id'])
                 results[entry['_id']] = entry
+                hits += 1
                 
+        if hits == 0:
+            return {}
+
     return results
+
+
+@app.route("/filter", methods=['GET'])
+def get_entries_by_tag():
+    email = request.args.get('email')
+    tag = request.args.get('tag')
+
+    resp = tags_collection.find_one({'tag': tag, 'email': email})
+    entries = resp['entries']
+
+    response_entries = []
+    for entry in entries:
+        entry_resp = entries_collection.find_one({'_id': entry})
+        entry_resp['_id'] = str(entry_resp['_id'])
+        response_entries.append(entry_resp)
+
+    return {'entries': response_entries} 
+
+@app.route("/user-tags", methods=['GET'])
+def get_all_user_tags():
+    email = request.args.get('email')
+    tags = tags_collection.find({'email': email})
+    tags = list(tags)
+    tag_names = set()
+    
+    for tag in tags:
+        tag_names.add(tag['tag'])
+
+    return {'tags': list(tag_names)}
+
 
 
 @app.route("/nuke-db", methods=['POST', 'GET'])
 def nuke_db():
     entries_collection.remove({})
     users_collection.remove({})
+    tags_collection.remove({})
     return {'status': 'Damage is catastrophic. The DB is ravaged. Zero survivors.'}
 
 
