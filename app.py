@@ -192,7 +192,7 @@ def create_user_entry():
     # parse relevant fields
     title_element = soup.find('title')
     if title_element != None:
-        entry_dict['title'] = title_element.string
+        entry_dict['title'] = title_element.string.lstrip(" ")
 
     metas = soup.find_all('meta')
 
