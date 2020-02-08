@@ -123,8 +123,7 @@ def login_user():
         error = 'Password is required.'
 
     if error != None:
-        abort(400, error)
-        return
+        return {"error": error}, 400
 
     resp = None
     
@@ -133,7 +132,7 @@ def login_user():
         resp = users_collection.find_one({'username': username})
 
     if resp == None:
-        abort(400, 'No account with that username or email found.')
+        return {"error": "No account with that username or email found."}, 400
 
     if check_password_hash(resp['password'], password):
         return {
@@ -151,6 +150,8 @@ def get_user_content():
 
     for item in resp:
         item['_id'] = str(item['_id'])
+
+    resp.reverse()
 
     return {'entries': resp}
 
@@ -271,7 +272,10 @@ def edit_entry():
     entries_collection.update_one(query, {'$set': new_values})
 
     # remove tags that are no longer present
-    new_tags = tags
+    if tags:
+        new_tags = tags
+    else:
+        new_tags = []
     tags_to_remove = []
     
     if old_tags:
@@ -290,23 +294,24 @@ def edit_entry():
 
 
     # create new tags in tags collection
-    for tag in tags:
-        res = tags_collection.find_one({'tag': tag, 'email': email})
-       
-        if res:
-            tags_query = {'tag': tag, 'email': email}
-            entries = res['entries']
-            
-            if entry_id not in entries:
-                entries.append(entry_id)
-                tags_collection.update_one(tags_query, {'$set': {'entries': entries}})
-        else:
-            tags_dict = {
-                'tag': tag,
-                'email': email,
-                'entries': [entry_id]
-            }
-            tags_collection.insert_one(tags_dict)
+    if tags:
+        for tag in tags:
+            res = tags_collection.find_one({'tag': tag, 'email': email})
+        
+            if res:
+                tags_query = {'tag': tag, 'email': email}
+                entries = res['entries']
+                
+                if entry_id not in entries:
+                    entries.append(entry_id)
+                    tags_collection.update_one(tags_query, {'$set': {'entries': entries}})
+            else:
+                tags_dict = {
+                    'tag': tag,
+                    'email': email,
+                    'entries': [entry_id]
+                }
+                tags_collection.insert_one(tags_dict)
     
     # response dictionary
     resp_dict = new_values
