@@ -193,14 +193,14 @@ def create_user_entry():
     # parse relevant fields
     title_element = soup.find('title')
     if title_element != None:
-        entry_dict['title'] = title_element.string.lstrip(" ")
+        entry_dict['title'] = title_element.string.strip(" ")
 
     metas = soup.find_all('meta')
 
     for meta in metas:
 
         if 'name' in meta.attrs and meta.attrs['name'] in important_tags:
-            if meta.attrs['name'] == 'keywords':
+            if meta.attrs['name'] == 'keywords': 
                 entry_dict['keywords'] = meta.attrs['content']
             if meta.attrs['name'] == 'description':
                 entry_dict['snippet'] = meta.attrs['content']
