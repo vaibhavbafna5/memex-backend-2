@@ -10,16 +10,19 @@ import requests
 import gunicorn
 import json
 
+
 class JSONEncoder(json.JSONEncoder):
     def default(self, o):
         if isinstance(o, ObjectId):
             return str(o)
         return json.JSONEncoder.default(self, o)
 
+
 app = Flask(__name__)
 CORS(app)
 
-client = MongoClient("mongodb+srv://memex-admin:BLQQqnv29x3SPc8R@cluster0-vnpfv.mongodb.net/test?retryWrites=true&w=majority")
+client = MongoClient(
+    "mongodb+srv://memex-admin:BLQQqnv29x3SPc8R@cluster0-vnpfv.mongodb.net/test?retryWrites=true&w=majority")
 db = client['Memex']
 
 users_collection = db['Users']
@@ -28,9 +31,11 @@ tags_collection = db['Tags']
 
 important_tags = {'title', 'keywords', 'description', }
 
+
 def form_or_json():
     data = request.get_json(silent=True)
     return data if data is not None else request.form
+
 
 def flatten_data(entry):
     data = ''
@@ -38,28 +43,30 @@ def flatten_data(entry):
         for tag in entry['tags']:
             data += tag.lower()
             data += " "
-            
+
     if entry['notes'] != None:
         data += entry['notes'].lower()
         data += " "
-    
+
     if entry['title'] != None:
         data += entry['title'].lower()
         data += " "
-        
+
     if entry['keywords'] != None:
         data += entry['keywords'].lower()
         data += " "
-        
+
     if entry['snippet'] != None:
         data += entry['snippet'].lower()
         data += " "
-    
+
     return data
+
 
 @app.route("/")
 def index():
     return "merp merp 2020"
+
 
 @app.route('/register', methods=['POST'])
 def register_user():
@@ -126,7 +133,7 @@ def login_user():
         return {"error": error}, 400
 
     resp = None
-    
+
     resp = users_collection.find_one({'email': username})
     if resp == None:
         resp = users_collection.find_one({'username': username})
@@ -142,6 +149,7 @@ def login_user():
 
     return {"error": "Invalid password"}, 400
 
+
 @app.route('/content', methods=['GET'])
 def get_user_content():
     email = request.args.get('email')
@@ -154,6 +162,7 @@ def get_user_content():
     resp.reverse()
 
     return {'entries': resp}
+
 
 @app.route('/entry/create', methods=['POST'])
 def create_user_entry():
@@ -193,14 +202,15 @@ def create_user_entry():
     # parse relevant fields
     title_element = soup.find('title')
     if title_element != None:
-        entry_dict['title'] = title_element.string.strip(" ")
+        splt_title = title_element.string.split()
+        entry_dict['title'] = ' '.join(splt_title)
 
     metas = soup.find_all('meta')
 
     for meta in metas:
 
         if 'name' in meta.attrs and meta.attrs['name'] in important_tags:
-            if meta.attrs['name'] == 'keywords': 
+            if meta.attrs['name'] == 'keywords':
                 entry_dict['keywords'] = meta.attrs['content']
             if meta.attrs['name'] == 'description':
                 entry_dict['snippet'] = meta.attrs['content']
@@ -220,7 +230,8 @@ def create_user_entry():
                 tags_query = {'tag': tag, 'email': email}
                 entries = res['entries']
                 entries.append(entry_id)
-                tags_collection.update_one(tags_query, {'$set': {'entries': entries}})
+                tags_collection.update_one(
+                    tags_query, {'$set': {'entries': entries}})
             else:
                 tags_dict = {
                     'tag': tag,
@@ -230,6 +241,7 @@ def create_user_entry():
                 tags_collection.insert_one(tags_dict)
 
     return response
+
 
 @app.route("/entry/edit", methods=['POST'])
 def edit_entry():
@@ -277,34 +289,37 @@ def edit_entry():
     else:
         new_tags = []
     tags_to_remove = []
-    
+
     if old_tags:
         for old_tag in old_tags:
-                if old_tag not in new_tags:
-                    tags_to_remove.append(old_tag)
-                    old_tag_res = tags_collection.find_one({'tag': old_tag, 'email': email})
-                    
-                    if len(old_tag_res['entries']) == 1:
-                        tags_collection.delete_one({'tag': old_tag, 'email': email})
-                    else:
-                        new_entries = old_tag_res['entries']
-                        new_entries.remove(entry_id)
-                        tags_query = {'tag': old_tag, 'email': email}
-                        tags_collection.update_one(tags_query, {'$set': {'entries': new_entries}})
+            if old_tag not in new_tags:
+                tags_to_remove.append(old_tag)
+                old_tag_res = tags_collection.find_one(
+                    {'tag': old_tag, 'email': email})
 
+                if len(old_tag_res['entries']) == 1:
+                    tags_collection.delete_one(
+                        {'tag': old_tag, 'email': email})
+                else:
+                    new_entries = old_tag_res['entries']
+                    new_entries.remove(entry_id)
+                    tags_query = {'tag': old_tag, 'email': email}
+                    tags_collection.update_one(
+                        tags_query, {'$set': {'entries': new_entries}})
 
     # create new tags in tags collection
     if tags:
         for tag in tags:
             res = tags_collection.find_one({'tag': tag, 'email': email})
-        
+
             if res:
                 tags_query = {'tag': tag, 'email': email}
                 entries = res['entries']
-                
+
                 if entry_id not in entries:
                     entries.append(entry_id)
-                    tags_collection.update_one(tags_query, {'$set': {'entries': entries}})
+                    tags_collection.update_one(
+                        tags_query, {'$set': {'entries': entries}})
             else:
                 tags_dict = {
                     'tag': tag,
@@ -312,13 +327,14 @@ def edit_entry():
                     'entries': [entry_id]
                 }
                 tags_collection.insert_one(tags_dict)
-    
+
     # response dictionary
     resp_dict = new_values
     resp_dict['_id'] = str(entry_id)
     resp_dict['email'] = email
 
     return resp_dict
+
 
 @app.route("/entry/delete", methods=['POST'])
 def delete_entry():
@@ -335,15 +351,18 @@ def delete_entry():
 
     if tags_to_delete:
         for tag_to_delete in tags_to_delete:
-            resp = tags_collection.find_one({'tag': tag_to_delete, 'email': email})
+            resp = tags_collection.find_one(
+                {'tag': tag_to_delete, 'email': email})
 
             if len(resp['entries']) == 1:
-                tags_collection.delete_one({'tag': tag_to_delete, 'email': email})
+                tags_collection.delete_one(
+                    {'tag': tag_to_delete, 'email': email})
             else:
                 new_entries = resp['entries']
                 new_entries.remove(entry_id)
                 tags_query = {'tag': tag_to_delete, 'email': email}
-                tags_collection.update_one(tags_query, {'$set': {'entries': new_entries}})
+                tags_collection.update_one(
+                    tags_query, {'$set': {'entries': new_entries}})
 
     # delete actual entry from entries collection
     delete_query = {
@@ -357,6 +376,7 @@ def delete_entry():
         abort(400, 'Error deleting entry - id invalid')
         return
 
+
 @app.route("/search", methods=['GET'])
 def search_entries():
     email = request.args.get('email')
@@ -367,11 +387,11 @@ def search_entries():
     queries = query.split(" ")
     user_entries = entries_collection.find({'email': email})
     user_entries = list(user_entries)
-    
+
     results = {}
-    
+
     for term in queries:
-        
+
         term = term.lower()
         hits = 0
 
@@ -379,11 +399,11 @@ def search_entries():
             data = flatten_data(user_entry)
             entry = user_entry
             entry['_id'] = str(entry['_id'])
-            
+
             if term in data:
                 results[entry['_id']] = entry
                 hits += 1
-                
+
         if hits == 0:
             return {}
 
@@ -404,7 +424,8 @@ def get_entries_by_tag():
         entry_resp['_id'] = str(entry_resp['_id'])
         response_entries.append(entry_resp)
 
-    return {'entries': response_entries} 
+    return {'entries': response_entries}
+
 
 @app.route("/user-tags", methods=['GET'])
 def get_all_user_tags():
@@ -412,12 +433,11 @@ def get_all_user_tags():
     tags = tags_collection.find({'email': email})
     tags = list(tags)
     tag_names = set()
-    
+
     for tag in tags:
         tag_names.add(tag['tag'])
 
     return {'tags': list(tag_names)}
-
 
 
 @app.route("/nuke-db", methods=['POST', 'GET'])
@@ -428,6 +448,5 @@ def nuke_db():
     return {'status': 'Damage is catastrophic. The DB is ravaged. Zero survivors.'}
 
 
-
 if __name__ == '__main__':
-   app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000)
