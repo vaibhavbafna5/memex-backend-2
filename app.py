@@ -164,6 +164,33 @@ def get_user_content():
     return {'entries': resp}
 
 
+@app.route('/memexes', methods=['GET'])
+def get_user_memexes():
+    email = request.args.get('email')
+
+    user_tags = tags_collection.find({'email': email})
+    user_tags = list(user_tags)
+
+    resp = []
+    for tag in user_tags:
+        memex_resp = {}
+        memex_entries = []
+
+        for entry_id in tag['entries']:
+            entry_resp = entries_collection.find_one({'_id': entry_id})
+            entry_resp['_id'] = str(entry_resp['_id'])
+            memex_entries.append(entry_resp)
+
+        memex_resp = {
+            'name': tag['tag'],
+            'entries': memex_entries
+        }
+
+        resp.append(memex_resp)
+
+    return {'memexes': resp}
+
+
 @app.route('/entry/create', methods=['POST'])
 def create_user_entry():
     data = form_or_json()
